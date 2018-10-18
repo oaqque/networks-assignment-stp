@@ -70,14 +70,18 @@ public class Sender {
                 // Update the book keeping
                 currentSeqNum += udpData.length - HEADER_SIZE;
                 dataSent += udpData.length - HEADER_SIZE;
-                currentAckNum += 1;
 
                 System.out.println("Packet successfully sent! Data Sent: " + dataSent);
             } else {
                 break;
             }
         }
-        // Close connection
+
+        // File has been completely sent at this point. Initiate the shutdown of the connection
+        if (!shutdownSender()) {
+            System.out.println("Failed to teardown network");
+            return;
+        }
     }
 
     /**
@@ -166,6 +170,45 @@ public class Sender {
         // Store the correct sequence numbers and acknowledgement numbers
         currentAckNum = serverisn + 1;
         currentSeqNum = clientisn + 1;
+
+        return true;
+    }
+
+    private static boolean shutdownSender() throws IOException {
+        // Create a FIN Packet and send it to the Receiver
+        System.out.println("Creating FIN Packet");
+        STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
+        DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
+        senderSocket.send(finPacket);
+        System.out.println("FIN Packet sent");
+
+        // Block while waiting for ACK
+        System.out.println("Block while waiting for ACK");
+        DatagramPacket dataPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
+        while (!checkSTPHeaderFlags(dataPacket, ACK_FLAG) && !checkSTPAckNum(dataPacket, currentSeqNum + HEADER_SIZE)) {
+            senderSocket.receive(dataPacket);
+        }
+        System.out.println("ACK for teardown received!");
+
+        currentSeqNum += HEADER_SIZE;
+
+        // Block while waiting for Receiver FIN
+        System.out.println("Block while waiting for FIN");
+        while (!checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
+            senderSocket.receive(dataPacket);
+        }
+        System.out.println("FIN received!, sending ACK");
+
+        // Create ACK Packet for Receiver
+        STP finRecHeader = new STP(getHeaderFromPacket(dataPacket).getHeader());
+        STP ackHeader = new STP(true, false, false, currentSeqNum, finRecHeader.getSequenceNum() + 1);
+        DatagramPacket ackPacket = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
+        senderSocket.send(ackPacket);
+
+        System.out.println("Final ACK sent. Teardown complete");
+
+        senderSocket.close();
+        inputReader.close();
 
         return true;
     }

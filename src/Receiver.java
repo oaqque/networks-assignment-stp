@@ -63,14 +63,6 @@ public class Receiver {
                 dataBuffer = new byte[mss][];
             }
 
-            // After receiving the packet ensure that this is not the final packet. If it is then we break the loop
-            // of receiving packets and initiate shutdown.
-            if (checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
-                // TODO
-                break;
-            }
-            System.out.println("Packet is not FIN Packet...");
-
             // Check if the packets are out of order...
             if (currentAckNum != packetSTP.getSequenceNum()) {
                 // TODO
@@ -87,6 +79,7 @@ public class Receiver {
 
             segmentSize = dataPacket.getLength() - HEADER_SIZE;
             currentAckNum += segmentSize;
+            currentSeqNum += 1;
 
             System.out.println("Creating ACK Packet...");
             STP ackSegment = new STP(true, false, false, currentSeqNum, currentAckNum);
@@ -95,6 +88,18 @@ public class Receiver {
 
             receiverSocket.send(ackPacket);
             System.out.println("ACK Packet successfully sent. Ack Num: " + currentAckNum);
+
+            // Finally check if the packet you just ACKed was a FIN Packet
+            if (checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
+                System.out.println("FIN Packet received, initiating shutdown");
+                break;
+            }
+        }
+
+        // Initiate the shutdown between Sender and Receiver
+        if (!shutdownReceiver()) {
+            System.out.println("Failed to teardown network");
+            return;
         }
 
     }
@@ -155,6 +160,27 @@ public class Receiver {
         return true;
     }
 
+    private static boolean shutdownReceiver() throws IOException {
+        // Create a FIN Packet and send it to the Sender
+        System.out.println("Creating FIN Packet...");
+        STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
+        DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
+        receiverSocket.send(finPacket);
+        System.out.println("FIN Packet sent!");
+
+        //Block while waiting for ACK
+        System.out.println("Block while waiting for ACK...");
+        DatagramPacket ackPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
+        while (!checkSTPHeaderFlags(ackPacket, ACK_FLAG) && !checkSTPAckNum(ackPacket, currentSeqNum + 1)) {
+            receiverSocket.receive(ackPacket);
+        }
+        System.out.println("ACK Received. Receiver successfully closed");
+
+
+
+        return true;
+    }
+
     private static void copyToBuffer (DatagramPacket datagramPacket) {
         // Copy the data from the Packet, without the header
         byte[] data = new byte[mss];
@@ -164,7 +190,6 @@ public class Receiver {
         // Calculate which packet this is in order to place it in the correct location within the buffer
         STP stp = getHeaderFromPacket(datagramPacket);
         int packetNum = (stp.getSequenceNum() - senderisn - 1) / mss;
-        System.out.println("Does this work?");
         dataBuffer[packetNum] = data;
     }
 
