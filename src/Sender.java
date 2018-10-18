@@ -96,18 +96,16 @@ public class Sender {
         // bit values
         int clientisn = randomGenerator.nextInt();
 
-        // Create Syn Packet
-        System.out.println("Creating STP Syn Packet...");
+        // Create Syn Packet and then sending it to the receiver
+        System.out.println("Creating SYN Packet...");
         STP connectionRequest = new STP(false, true, false, clientisn, 0);
         DatagramPacket synPacket = new DatagramPacket(connectionRequest.getHeader(), HEADER_SIZE, receiverHost,
                 receiverPort);
-        System.out.println("STP Syn Packet creation success.");
-
-        // Sending SYN Packet
         senderSocket.send(synPacket);
+        System.out.println("SYN Packet successfully sent");
 
-        // Waiting for SYNACK Packet
-        System.out.println("Waiting for SynAck...");
+        // Block while waiting for SYNACK Packet
+        System.out.println("Block while waiting for SYNACK Packet...");
         DatagramPacket synAckPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
 
         // Ensure that the packet received is a SYNACK packet, we do this by ensuring that the SYN and ACK flags are
@@ -117,18 +115,18 @@ public class Sender {
                 !checkSTPAckNum(synAckPacket, clientisn+1)) {
             senderSocket.receive(synAckPacket);
         }
-        System.out.println("SynAck segment received.");
+        System.out.println("SYNACK Packet successfully received");
 
         // Retrieve the STP header from the SYNACK Packet
         STP synAckSTP = getHeaderFromPacket(synAckPacket);
         int serverisn = synAckSTP.getSequenceNum();
 
         // Sending out the Ack for the SYNACK segment
-        System.out.println("Creating final Ack Packet for handshake.");
+        System.out.println("Creating ACK Packet...");
         STP ackSTP = new STP(true, false, false, clientisn+1, serverisn+1);
-        DatagramPacket ackPacket = new DatagramPacket(ackSTP.getHeader(), HEADER_SIZE);
+        DatagramPacket ackPacket = new DatagramPacket(ackSTP.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
-        System.out.println("Ack Packet sent.");
+        System.out.println("ACK Packet sent, three-way handshake complete");
 
         return true;
     }
