@@ -70,6 +70,8 @@ public class Sender {
                 // Update the book keeping
                 currentSeqNum += udpData.length - HEADER_SIZE;
                 dataSent += udpData.length - HEADER_SIZE;
+                currentAckNum += 1;
+
                 System.out.println("Packet successfully sent! Data Sent: " + dataSent);
             } else {
                 break;
