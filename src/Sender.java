@@ -55,7 +55,7 @@ public class Sender {
 
         // Stop and Wait Protocol
         while (true) {
-            if (file.length() >= dataSent) {
+            if (file.length() > dataSent) {
                 // Create a byte array that will be attached to the UDP Packet to be sent
                 byte[] udpData = new byte[mss + HEADER_SIZE];
 
@@ -64,17 +64,34 @@ public class Sender {
                 System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
 
                 // Grab the data from the input reader and add it to byte array with an offset for the header. Then
-                // attach the data to a packet and send it.
-                inputReader.read(udpData, HEADER_SIZE, mss);
-                DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
-                senderSocket.send(dataPacket);
-                printToLog(dataPacket, "snd");
+                // attach the data to a packet and send it. read() also returns the number of bytes read so we store
+                // this in a variable
+                int bytesRead = inputReader.read(udpData, HEADER_SIZE, mss);
 
-                // Update the book keeping
-                currentSeqNum += udpData.length - HEADER_SIZE;
-                dataSent += udpData.length - HEADER_SIZE;
+                // If the bytesRead is less than the mss, then we will create a smaller packet
+                if (bytesRead < mss && bytesRead != -1) {
+                    byte[] tempData = new byte[bytesRead + HEADER_SIZE];
+                    System.arraycopy(stp.getHeader(), 0, tempData, 0, HEADER_SIZE);
+                    System.arraycopy(udpData, HEADER_SIZE, tempData, HEADER_SIZE, bytesRead);
+                    DatagramPacket dataPacket = new DatagramPacket(tempData, tempData.length, receiverHost,
+                            receiverPort);
+                    senderSocket.send(dataPacket);
+                    printToLog(dataPacket, "snd");
 
-                System.out.println("Packet successfully sent! Data Sent: " + dataSent);
+                    // Update the book keeping
+                    currentSeqNum += tempData.length - HEADER_SIZE;
+                    dataSent += tempData.length - HEADER_SIZE;
+                    System.out.println("Packet successfully sent! Data Sent: " + dataSent);
+                } else {
+                    DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
+                    senderSocket.send(dataPacket);
+                    printToLog(dataPacket, "snd");
+
+                    // Update the book keeping
+                    currentSeqNum += udpData.length - HEADER_SIZE;
+                    dataSent += udpData.length - HEADER_SIZE;
+                    System.out.println("Packet successfully sent! Data Sent: " + dataSent);
+                }
             } else {
                 break;
             }

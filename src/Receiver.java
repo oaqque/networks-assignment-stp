@@ -1,7 +1,5 @@
 import javax.xml.crypto.Data;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -20,6 +18,8 @@ public class Receiver {
     private static byte[][] dataBuffer;
     private static int senderisn;
     private static int receiverisn;
+    private static PrintWriter writer;
+    private static long timer;
 
     private static final int HEADER_SIZE = 9;
     private static final int ACK_FLAG = 0;
@@ -54,6 +54,8 @@ public class Receiver {
         while (true) {
             System.out.println("Block while waiting for data packet...");
             receiverSocket.receive(dataPacket);
+            printToLog(dataPacket, "rcv");
+            System.out.println("A Packet was received");
             packetSTP = getHeaderFromPacket(dataPacket);
 
             // Check if the packet received is a FIN Packet, if so then break and initiate shutdown
@@ -74,7 +76,6 @@ public class Receiver {
             if (currentAckNum != packetSTP.getSequenceNum()) {
                 // TODO
             }
-            System.out.println("Packet is in order...");
 
             // Since it is not a FIN Packet then we simply ACK the packet.
             // First get the sequence number from the packet we just received and ACK back the sequence number + the
@@ -94,6 +95,7 @@ public class Receiver {
                     sourceAddress, sourcePort);
 
             receiverSocket.send(ackPacket);
+            printToLog(ackPacket, "snd");
             System.out.println("ACK Packet successfully sent. Ack Num: " + currentAckNum);
 
             // Finally check if the packet you just ACKed was a FIN Packet
@@ -107,7 +109,7 @@ public class Receiver {
 
     }
 
-    private static boolean bootstrapReceiver (String[] args) {
+    private static boolean bootstrapReceiver (String[] args) throws FileNotFoundException, UnsupportedEncodingException {
         receiverPort = Integer.parseInt(args[0]);
         fileName = args[1];
 
@@ -118,6 +120,9 @@ public class Receiver {
             e.printStackTrace();
             return false;
         }
+
+        writer = new PrintWriter("Receiver_log.txt", "UTF-8");
+        timer = System.currentTimeMillis();
 
         return true;
     }
@@ -134,6 +139,7 @@ public class Receiver {
 
         // Once you have accepted the original SYN Packet, note down the address and port number of the source in
         // order to send ACK packets back. Note down the ISN in order to ACK the correct packet.
+        printToLog(synPacket, "rcv");
         System.out.println("SYN successfully received");
         sourceAddress = synPacket.getAddress();
         sourcePort = synPacket.getPort();
@@ -147,6 +153,7 @@ public class Receiver {
         DatagramPacket synAckPacket = new DatagramPacket(synAckSegment.getHeader(), synAckSegment.getHeader().length,
                 sourceAddress, sourcePort);
         receiverSocket.send(synAckPacket);
+        printToLog(synAckPacket, "snd");
         System.out.println("SYNACK Packet successfully sent");
 
         // Create a Datagram Packet to store the incoming Ack Packet
@@ -158,6 +165,7 @@ public class Receiver {
             receiverSocket.receive(ackPacket);
         }
         currentSeqNum = receiverisn + 1;
+        printToLog(ackPacket, "rcv");
         System.out.println("ACK successfully received, three way handshake complete");
 
         return true;
@@ -168,12 +176,14 @@ public class Receiver {
         STP ackHeader = new STP(true, false, false, currentSeqNum, currentAckNum + 1);
         DatagramPacket ackPacket1 = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
         receiverSocket.send(ackPacket1);
+        printToLog(ackPacket1, "snd");
 
         // Create a FIN Packet and send it to the Sender
         System.out.println("Creating FIN Packet...");
         STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
         DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
         receiverSocket.send(finPacket);
+        printToLog(finPacket, "snd");
         System.out.println("FIN Packet sent!");
 
         //Block while waiting for ACK
@@ -182,6 +192,7 @@ public class Receiver {
         while (!checkSTPHeaderFlags(ackPacket2, ACK_FLAG) && !checkSTPAckNum(ackPacket2, currentSeqNum + 1)) {
             receiverSocket.receive(ackPacket2);
         }
+        printToLog(ackPacket2, "rcv");
         System.out.println("ACK Received. Receiver successfully closed");
 
         // Write the data from the buffer into a file
@@ -194,7 +205,10 @@ public class Receiver {
                 break;
             }
         }
+
         fileWriter.close();
+        writer.close();
+
         System.out.println("Data copied successfully into file: " + fileName);
         return true;
     }
@@ -244,5 +258,43 @@ public class Receiver {
         System.arraycopy(packetData, 0, header, 0, HEADER_SIZE);
         STP stpHeader = new STP(header);
         return stpHeader;
+    }
+
+    private static void printToLog(DatagramPacket datagramPacket, String event) {
+        STP header = getHeaderFromPacket(datagramPacket);
+        long currentTime = System.currentTimeMillis();
+
+        // Print the type of event
+        writer.print(event);
+
+        // Print the time of event
+        writer.print(String.format("%7s", currentTime - timer));
+
+        // Check what flags are set in the header and print appropriately
+        if(checkSTPHeaderFlags(datagramPacket, SYN_FLAG) && checkSTPHeaderFlags(datagramPacket, ACK_FLAG)) {
+            writer.print(String.format("%7s", "SA"));
+        } else if (checkSTPHeaderFlags(datagramPacket, SYN_FLAG)) {
+            writer.print(String.format("%7s", "S"));
+        } else if (checkSTPHeaderFlags(datagramPacket, ACK_FLAG)) {
+            writer.print(String.format("%7s", "A"));
+        } else if (checkSTPHeaderFlags(datagramPacket, FIN_FLAG)) {
+            writer.print(String.format("%7s", "F"));
+        } else {
+            // If nothing else then it is just data
+            writer.print(String.format("%7s", "D"));
+        }
+
+        // Print the Sequence Number
+        writer.print(String.format("%17s", header.getSequenceNum()));
+
+        // Print the Number of Bytes of Data
+        if (datagramPacket.getLength() == HEADER_SIZE) {
+            writer.print(String.format("%7s", 0));
+        } else {
+            writer.print(String.format("%7s", datagramPacket.getLength() - HEADER_SIZE));
+        }
+
+        // Print the Acknowledgement Number
+        writer.println(String.format("%17s", header.getAckNum()));
     }
 }
