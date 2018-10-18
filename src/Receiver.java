@@ -57,7 +57,7 @@ public class Receiver {
 
             // Check if this is the first packet arriving from the sender, if it is then we will note down the
             // maximum segment size and create a buffer to store the data.
-            if (packetSTP.checkAckNum(senderisn + 1)) {
+            if (packetSTP.getSequenceNum() == senderisn + 1) {
                 System.out.println("This is the first packet...");
                 mss = dataPacket.getLength() - HEADER_SIZE;
                 dataBuffer = new byte[mss][];
@@ -158,11 +158,13 @@ public class Receiver {
     private static void copyToBuffer (DatagramPacket datagramPacket) {
         // Copy the data from the Packet, without the header
         byte[] data = new byte[mss];
-        System.arraycopy(datagramPacket, HEADER_SIZE, data, 0, mss);
+
+        System.arraycopy(datagramPacket.getData(), HEADER_SIZE, data, 0, mss);
 
         // Calculate which packet this is in order to place it in the correct location within the buffer
         STP stp = getHeaderFromPacket(datagramPacket);
         int packetNum = (stp.getSequenceNum() - senderisn - 1) / mss;
+        System.out.println("Does this work?");
         dataBuffer[packetNum] = data;
     }
 
@@ -185,7 +187,7 @@ public class Receiver {
      */
     private static boolean checkSTPAckNum (DatagramPacket packet, int ackNum) {
         STP header = getHeaderFromPacket(packet);
-        return header.checkAckNum(ackNum);
+        return header.getAckNum() == ackNum;
     }
 
     /**

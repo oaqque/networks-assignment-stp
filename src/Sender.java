@@ -189,7 +189,7 @@ public class Sender {
      */
     private static boolean checkSTPAckNum(DatagramPacket packet, int ackNum) {
         STP header = getHeaderFromPacket(packet);
-        return header.checkAckNum(ackNum);
+        return header.getAckNum() == ackNum;
     }
 
     /**
