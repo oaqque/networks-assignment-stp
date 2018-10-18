@@ -1,4 +1,6 @@
 import javax.xml.crypto.Data;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -176,8 +178,18 @@ public class Receiver {
         }
         System.out.println("ACK Received. Receiver successfully closed");
 
-
-
+        // Write the data from the buffer into a file
+        System.out.println("Writing data out from buffer to file...");
+        BufferedWriter fileWriter = new BufferedWriter(new FileWriter(fileName));
+        for (int i = 0; i < dataBuffer.length; i++) {
+            if (dataBuffer[i] != null) {
+                fileWriter.write(new String(dataBuffer[i]));
+            } else {
+                break;
+            }
+        }
+        fileWriter.close();
+        System.out.println("Data copied successfully into file: " + fileName);
         return true;
     }
 
