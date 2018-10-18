@@ -1,4 +1,5 @@
-import java.io.IOException;
+import javax.xml.crypto.Data;
+import java.io.*;
 import java.net.*;
 import java.util.Random;
 
@@ -17,8 +18,14 @@ public class Sender {
     private static double pDelay;               // Probability that segment not dropped/dup/corpt/reordered is delayed
     private static int maxDelay;                // The maximum delay in ms experienced by segments that are delayed
     private static long seed;                   // The seed used for random number generator
+
     private static Random randomGenerator;      // The Random Number generator
     private static DatagramSocket senderSocket; // The UDP socket for the sender to send through
+    private static InputStream inputReader;     // The reader for segmenting the data in the pdf
+    private static File file;                   // The PDF file that is to be sent to the server
+    private static int currentSeqNum;           // The current sequence number which we are up to sending
+    private static int currentAckNum;           // The current acknowledgement number that the server has given us
+    private static int dataSent;                // The amount of bytes that have been sent
 
     private static final int HEADER_SIZE = 9;
     private static final int ACK_FLAG = 0;
@@ -45,7 +52,29 @@ public class Sender {
         }
 
         // Stop and Wait Protocol
+        while (true) {
+            if (file.length() >= dataSent) {
+                // Create a byte array that will be attached to the UDP Packet to be sent
+                byte[] udpData = new byte[mss + HEADER_SIZE];
 
+                // Create an STP header and append it to the top of the UDP Data
+                STP stp = new STP(false, false, false, currentSeqNum, currentAckNum);
+                System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
+
+                // Grab the data from the input reader and add it to byte array with an offset for the header. Then
+                // attach the data to a packet and send it.
+                inputReader.read(udpData, HEADER_SIZE, mss);
+                DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
+                senderSocket.send(dataPacket);
+
+                // Update the book keeping
+                currentSeqNum += udpData.length - HEADER_SIZE;
+                dataSent += udpData.length - HEADER_SIZE;
+                System.out.println("Packet successfully sent! Data Sent: " + dataSent);
+            } else {
+                break;
+            }
+        }
         // Close connection
     }
 
@@ -55,7 +84,7 @@ public class Sender {
      * @param args
      * @return
      */
-    private static boolean bootstrapSender (String[] args) {
+    private static boolean bootstrapSender (String[] args) throws FileNotFoundException {
         try {
             receiverHost = InetAddress.getByName(args[0]);
         } catch (UnknownHostException e) {
@@ -87,6 +116,10 @@ public class Sender {
             e.printStackTrace();
             return false;
         }
+
+        file = new File(fileName);
+        inputReader = new FileInputStream(file);
+        dataSent = 0;
 
         return true;
     }
@@ -127,6 +160,10 @@ public class Sender {
         DatagramPacket ackPacket = new DatagramPacket(ackSTP.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
         System.out.println("ACK Packet sent, three-way handshake complete");
+
+        // Store the correct sequence numbers and acknowledgement numbers
+        currentAckNum = serverisn + 1;
+        currentSeqNum = clientisn + 1;
 
         return true;
     }
