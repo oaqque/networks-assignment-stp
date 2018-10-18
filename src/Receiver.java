@@ -52,10 +52,15 @@ public class Receiver {
 
         // After handshake has been completed, Block the server waiting for packets
         while (true) {
-
             System.out.println("Block while waiting for data packet...");
             receiverSocket.receive(dataPacket);
             packetSTP = getHeaderFromPacket(dataPacket);
+
+            // Check if the packet received is a FIN Packet, if so then break and initiate shutdown
+            if (checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
+                System.out.println("FIN Packet received, initiating shutdown");
+                break;
+            }
 
             // Check if this is the first packet arriving from the sender, if it is then we will note down the
             // maximum segment size and create a buffer to store the data.
@@ -92,14 +97,10 @@ public class Receiver {
             System.out.println("ACK Packet successfully sent. Ack Num: " + currentAckNum);
 
             // Finally check if the packet you just ACKed was a FIN Packet
-            if (checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
-                System.out.println("FIN Packet received, initiating shutdown");
-                break;
-            }
         }
 
         // Initiate the shutdown between Sender and Receiver
-        if (!shutdownReceiver()) {
+        if (!shutdownReceiver(dataPacket)) {
             System.out.println("Failed to teardown network");
             return;
         }
@@ -162,7 +163,12 @@ public class Receiver {
         return true;
     }
 
-    private static boolean shutdownReceiver() throws IOException {
+    private static boolean shutdownReceiver(DatagramPacket initFinPacket) throws IOException {
+        // After Receiving the FIN Packet we must ACK the Packet
+        STP ackHeader = new STP(true, false, false, currentSeqNum, currentAckNum + 1);
+        DatagramPacket ackPacket1 = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
+        receiverSocket.send(ackPacket1);
+
         // Create a FIN Packet and send it to the Sender
         System.out.println("Creating FIN Packet...");
         STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
@@ -172,9 +178,9 @@ public class Receiver {
 
         //Block while waiting for ACK
         System.out.println("Block while waiting for ACK...");
-        DatagramPacket ackPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
-        while (!checkSTPHeaderFlags(ackPacket, ACK_FLAG) && !checkSTPAckNum(ackPacket, currentSeqNum + 1)) {
-            receiverSocket.receive(ackPacket);
+        DatagramPacket ackPacket2 = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
+        while (!checkSTPHeaderFlags(ackPacket2, ACK_FLAG) && !checkSTPAckNum(ackPacket2, currentSeqNum + 1)) {
+            receiverSocket.receive(ackPacket2);
         }
         System.out.println("ACK Received. Receiver successfully closed");
 

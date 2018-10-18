@@ -26,6 +26,8 @@ public class Sender {
     private static int currentSeqNum;           // The current sequence number which we are up to sending
     private static int currentAckNum;           // The current acknowledgement number that the server has given us
     private static int dataSent;                // The amount of bytes that have been sent
+    private static long timer;                  // A note of the time that the sender started sending
+    private static PrintWriter writer;          // A writer for outputting a Log as text
 
     private static final int HEADER_SIZE = 9;
     private static final int ACK_FLAG = 0;
@@ -66,6 +68,7 @@ public class Sender {
                 inputReader.read(udpData, HEADER_SIZE, mss);
                 DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
                 senderSocket.send(dataPacket);
+                printToLog(dataPacket, "snd");
 
                 // Update the book keeping
                 currentSeqNum += udpData.length - HEADER_SIZE;
@@ -90,7 +93,7 @@ public class Sender {
      * @param args
      * @return
      */
-    private static boolean bootstrapSender (String[] args) throws FileNotFoundException {
+    private static boolean bootstrapSender (String[] args) throws FileNotFoundException, UnsupportedEncodingException {
         try {
             receiverHost = InetAddress.getByName(args[0]);
         } catch (UnknownHostException e) {
@@ -126,6 +129,8 @@ public class Sender {
         file = new File(fileName);
         inputReader = new FileInputStream(file);
         dataSent = 0;
+        timer = System.currentTimeMillis();
+        writer = new PrintWriter("Sender_log.txt", "UTF-8");
 
         return true;
     }
@@ -141,6 +146,7 @@ public class Sender {
         DatagramPacket synPacket = new DatagramPacket(connectionRequest.getHeader(), HEADER_SIZE, receiverHost,
                 receiverPort);
         senderSocket.send(synPacket);
+        printToLog(synPacket, "snd");
         System.out.println("SYN Packet successfully sent");
 
         // Block while waiting for SYNACK Packet
@@ -154,6 +160,7 @@ public class Sender {
                 !checkSTPAckNum(synAckPacket, clientisn+1)) {
             senderSocket.receive(synAckPacket);
         }
+        printToLog(synAckPacket, "rcv");
         System.out.println("SYNACK Packet successfully received");
 
         // Retrieve the STP header from the SYNACK Packet
@@ -165,6 +172,7 @@ public class Sender {
         STP ackSTP = new STP(true, false, false, clientisn+1, serverisn+1);
         DatagramPacket ackPacket = new DatagramPacket(ackSTP.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
+        printToLog(ackPacket, "snd");
         System.out.println("ACK Packet sent, three-way handshake complete");
 
         // Store the correct sequence numbers and acknowledgement numbers
@@ -180,14 +188,16 @@ public class Sender {
         STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
         DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(finPacket);
+        printToLog(finPacket, "snd");
         System.out.println("FIN Packet sent");
 
         // Block while waiting for ACK
         System.out.println("Block while waiting for ACK");
         DatagramPacket dataPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
-        while (!checkSTPHeaderFlags(dataPacket, ACK_FLAG) && !checkSTPAckNum(dataPacket, currentSeqNum + HEADER_SIZE)) {
+        while (!checkSTPHeaderFlags(dataPacket, ACK_FLAG) && !checkSTPAckNum(dataPacket, currentSeqNum + 1)) {
             senderSocket.receive(dataPacket);
         }
+        printToLog(dataPacket, "rcv");
         System.out.println("ACK for teardown received!");
 
         currentSeqNum += HEADER_SIZE;
@@ -197,6 +207,7 @@ public class Sender {
         while (!checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
             senderSocket.receive(dataPacket);
         }
+        printToLog(dataPacket, "rcv");
         System.out.println("FIN received!, sending ACK");
 
         // Create ACK Packet for Receiver
@@ -204,11 +215,12 @@ public class Sender {
         STP ackHeader = new STP(true, false, false, currentSeqNum, finRecHeader.getSequenceNum() + 1);
         DatagramPacket ackPacket = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
-
+        printToLog(ackPacket, "snd");
         System.out.println("Final ACK sent. Teardown complete");
 
         senderSocket.close();
         inputReader.close();
+        writer.close();
 
         return true;
     }
@@ -246,5 +258,43 @@ public class Sender {
         System.arraycopy(packetData, 0, header, 0, HEADER_SIZE);
         STP stpHeader = new STP(header);
         return stpHeader;
+    }
+
+    private static void printToLog(DatagramPacket datagramPacket, String event) {
+        STP header = getHeaderFromPacket(datagramPacket);
+        long currentTime = System.currentTimeMillis();
+
+        // Print the type of event
+        writer.print(event);
+
+        // Print the time of event
+        writer.print(String.format("%7s", currentTime - timer));
+
+        // Check what flags are set in the header and print appropriately
+        if(checkSTPHeaderFlags(datagramPacket, SYN_FLAG) && checkSTPHeaderFlags(datagramPacket, ACK_FLAG)) {
+            writer.print(String.format("%7s", "SA"));
+        } else if (checkSTPHeaderFlags(datagramPacket, SYN_FLAG)) {
+            writer.print(String.format("%7s", "S"));
+        } else if (checkSTPHeaderFlags(datagramPacket, ACK_FLAG)) {
+            writer.print(String.format("%7s", "A"));
+        } else if (checkSTPHeaderFlags(datagramPacket, FIN_FLAG)) {
+            writer.print(String.format("%7s", "F"));
+        } else {
+            // If nothing else then it is just data
+            writer.print(String.format("%7s", "D"));
+        }
+
+        // Print the Sequence Number
+        writer.print(String.format("%17s", header.getSequenceNum()));
+
+        // Print the Number of Bytes of Data
+        if (datagramPacket.getLength() == HEADER_SIZE) {
+            writer.print(String.format("%7s", 0));
+        } else {
+            writer.print(String.format("%7s", datagramPacket.getLength() - HEADER_SIZE));
+        }
+
+        // Print the Acknowledgement Number
+        writer.println(String.format("%17s", header.getAckNum()));
     }
 }
