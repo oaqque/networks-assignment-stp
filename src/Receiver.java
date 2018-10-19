@@ -1,9 +1,10 @@
-import javax.xml.crypto.Data;
 import java.io.*;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.util.zip.CRC32;
+import java.util.zip.Checksum;
 
 public class Receiver {
     private static int receiverPort;
@@ -22,7 +23,7 @@ public class Receiver {
     private static PrintWriter writer;
     private static long timer;
 
-    private static final int HEADER_SIZE = 9;
+    private static final int HEADER_SIZE = 17;
     private static final int ACK_FLAG = 0;
     private static final int SYN_FLAG = 1;
     private static final int FIN_FLAG = 2;
@@ -62,6 +63,11 @@ public class Receiver {
             System.out.println("A Packet was received");
             packetSTP = getHeaderFromPacket(dataPacket);
 
+            // Discard all corrupted packets
+            if (isCorrupted(dataPacket)) {
+                continue;
+            }
+
             // Check if the packet received is a FIN Packet, if so then break and initiate shutdown
             if (checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
                 System.out.println("FIN Packet received, initiating shutdown");
@@ -90,7 +96,6 @@ public class Receiver {
             if (currentAckNum != packetSTP.getSequenceNum()) {
                 System.out.println("This packet was out of order...");
                 System.out.println("Retransmitting previous ack");
-                printBuffer();
             } else {
                 System.out.println("Packet is in order...");
                 System.out.println("ACK the cumulative bytes");
@@ -101,7 +106,7 @@ public class Receiver {
             }
 
             System.out.println("Creating ACK Packet...");
-            STP ackSegment = new STP(true, false, false, currentSeqNum, currentAckNum);
+            STP ackSegment = new STP(true, false, false, currentSeqNum, currentAckNum,0);
             DatagramPacket ackPacket = new DatagramPacket(ackSegment.getHeader(), ackSegment.getHeader().length,
                     sourceAddress, sourcePort);
 
@@ -113,7 +118,7 @@ public class Receiver {
         }
 
         // Initiate the shutdown between Sender and Receiver
-        if (!shutdownReceiver(dataPacket)) {
+        if (!shutdownReceiver()) {
             System.out.println("Failed to teardown network");
             return;
         }
@@ -149,7 +154,7 @@ public class Receiver {
         return true;
     }
 
-    private static boolean handshake () throws IOException {
+    private static boolean handshake() throws IOException {
         System.out.println("--------------------------------------------");
         System.out.println("Starting handshake procedure...");
         // Create a Datagram Packet to store the incoming Syn Packet.
@@ -173,7 +178,7 @@ public class Receiver {
 
         // Create a SYNACK Packet and send it back to the host.
         System.out.println("Creating SYNACK Packet...");
-        STP synAckSegment = new STP(true, true, false, receiverisn, senderisn + 1);
+        STP synAckSegment = new STP(true, true, false, receiverisn, senderisn + 1, 0);
         DatagramPacket synAckPacket = new DatagramPacket(synAckSegment.getHeader(), synAckSegment.getHeader().length,
                 sourceAddress, sourcePort);
         receiverSocket.send(synAckPacket);
@@ -197,18 +202,18 @@ public class Receiver {
         return true;
     }
 
-    private static boolean shutdownReceiver(DatagramPacket initFinPacket) throws IOException {
+    private static boolean shutdownReceiver() throws IOException {
         System.out.println("--------------------------------------------");
         System.out.println("FIN Packet received. Initiate network teardown...");
         // After Receiving the FIN Packet we must ACK the Packet
-        STP ackHeader = new STP(true, false, false, currentSeqNum, currentAckNum + 1);
+        STP ackHeader = new STP(true, false, false, currentSeqNum, currentAckNum + 1,0);
         DatagramPacket ackPacket1 = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
         receiverSocket.send(ackPacket1);
         printToLog(ackPacket1, "snd");
 
         // Create a FIN Packet and send it to the Sender
         System.out.println("Creating FIN Packet...");
-        STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
+        STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum,0);
         DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
         receiverSocket.send(finPacket);
         printToLog(finPacket, "snd");
@@ -295,7 +300,7 @@ public class Receiver {
         return stpHeader;
     }
 
-    private static void printToLog(DatagramPacket datagramPacket, String event) {
+    private static void printToLog (DatagramPacket datagramPacket, String event) {
         STP header = getHeaderFromPacket(datagramPacket);
         long currentTime = System.currentTimeMillis();
 
@@ -335,21 +340,32 @@ public class Receiver {
 
     private static DatagramPacket getLatestPacket() {
         DatagramPacket datagramPacket = null;
-        byte[] temp;
         int i = 0;
         while (packetBuffer[i] != null) {
             datagramPacket = packetBuffer[i];
             i++;
         }
-
         return datagramPacket;
     }
-    // FOR TESTING // TODO REMOVE
-    private static void printBuffer() {
-        for (int i = 0; i < dataBuffer.length; i++) {
-            if (dataBuffer[i] != null) {
-                System.out.println(i + " cell has something in it");
-            }
+
+    private static boolean isCorrupted (DatagramPacket datagramPacket) {
+        // First copy the data into a byte array
+        byte[] data = new byte[datagramPacket.getLength() - HEADER_SIZE];
+        System.arraycopy(datagramPacket.getData(), HEADER_SIZE, data,0,datagramPacket.getLength() - HEADER_SIZE);
+
+        // Calculate the checksum on that data
+        Checksum checksum = new CRC32();
+        checksum.update(data,0, data.length);
+        long calculatedChecksum = checksum.getValue();
+
+        System.out.println("Checksum calculated as " + calculatedChecksum);
+
+        // Get the checksum from the header of the packet
+        STP stpHeader = getHeaderFromPacket(datagramPacket);
+        if (calculatedChecksum != stpHeader.getChecksum()) {
+            return true;
+        } else {
+            return false;
         }
     }
 }

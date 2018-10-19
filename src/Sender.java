@@ -1,6 +1,8 @@
 import java.io.*;
 import java.net.*;
 import java.util.Random;
+import java.util.zip.CRC32;
+import java.util.zip.Checksum;
 
 public class Sender {
     private static InetAddress receiverHost;    // receiver_host_ip: The IP address of Receiver machine
@@ -43,7 +45,7 @@ public class Sender {
     private static DatagramPacket[] packetsSent;  // This array will store the packets sent to make it easier to
     // resend dropped packets
 
-    private static final int HEADER_SIZE = 9;
+    private static final int HEADER_SIZE = 17;
     private static final int ACK_FLAG = 0;
     private static final int SYN_FLAG = 1;
     private static final int FIN_FLAG = 2;
@@ -83,30 +85,54 @@ public class Sender {
                 // Create a byte array that will be attached to the UDP Packet to be sent
                 byte[] udpData = new byte[mss + HEADER_SIZE];
 
-                // Create an STP header and append it to the top of the UDP Data
-                STP stp = new STP(false, false, false, currentSeqNum, currentAckNum);
-                System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
-
                 // Grab the data from the input reader and add it to byte array with an offset for the header. Then
                 // attach the data to a packet and send it. read() also returns the number of bytes read so we store
                 // this in a variable
                 int bytesRead = inputReader.read(udpData, HEADER_SIZE, mss);
 
+                // Create an STP header and append it to the top of the UDP Data
+                STP stp = new STP(false, false, false, currentSeqNum, currentAckNum, 0);
+                System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
+
                 // If the bytesRead is less than the mss, then we will create a smaller packet
                 if (bytesRead < mss && bytesRead != -1) {
                     byte[] tempData = new byte[bytesRead + HEADER_SIZE];
+
+                    // Calculate and add the checksum to the header before sending
+                    byte[] packetData = new byte[bytesRead];
+                    System.arraycopy(udpData, HEADER_SIZE, packetData, 0, bytesRead);
+                    long checksum = calculateChecksum(packetData);
+                    System.out.println("Checksum calculated as " + checksum);
+                    stp.setChecksum(checksum);
+
                     System.arraycopy(stp.getHeader(), 0, tempData, 0, HEADER_SIZE);
                     System.arraycopy(udpData, HEADER_SIZE, tempData, HEADER_SIZE, bytesRead);
+
                     DatagramPacket dataPacket = new DatagramPacket(tempData, tempData.length, receiverHost,
                             receiverPort);
 
-                    // Simulate the chance that the packet will be dropped
+                    // PLD module
                     if (randomGenerator.nextDouble() > pDrop) {
-                        senderSocket.send(dataPacket);
-                        printToLog(dataPacket, "snd ");
+                        if (randomGenerator.nextDouble() > pDuplicate) {
+                            if (randomGenerator.nextDouble() > pCorrupt) {
+                                if (randomGenerator.nextDouble() > pOrder) {
+                                    if (randomGenerator.nextDouble() > pDelay) {
+                                        senderSocket.send(dataPacket);
+                                        printToLog(dataPacket, "snd ");
+                                    } else {
+                                        // delayPacket();
+                                    }
+                                } else {
+                                    // reorderPacket();
+                                }
+                            } else {
+                                // sendCorruptPacket(tempData);
+                            }
+                        } else {
+                            duplicatePackets(dataPacket);
+                        }
                     } else {
-                        printToLog(dataPacket, "drop");
-                        System.out.println("PACKET DROPPED");
+                        dropPackets(dataPacket);
                     }
 
                     // Note the time the segment was sent and store the packet in the array
@@ -121,14 +147,38 @@ public class Sender {
                     System.out.println("Packet successfully sent! Data Sent: " + dataSent);
 
                 } else {
+                    // Calculate a checksum first and reevaluate the packet
+                    byte[] tempData = new byte[mss];
+                    System.arraycopy(udpData, HEADER_SIZE, tempData, 0, mss);
+                    long checksum = calculateChecksum(tempData);
+                    System.out.println("Checksum calculated as " + checksum);
+                    stp.setChecksum(checksum);
+                    System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
+
                     DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
-                    // Simulate the chance that the packet will be dropped
+
+                    // PLD module
                     if (randomGenerator.nextDouble() > pDrop) {
-                        senderSocket.send(dataPacket);
-                        printToLog(dataPacket, "snd ");
+                        if (randomGenerator.nextDouble() > pDuplicate) {
+                            if (randomGenerator.nextDouble() > pCorrupt) {
+                                if (randomGenerator.nextDouble() > pOrder) {
+                                    if (randomGenerator.nextDouble() > pDelay) {
+                                        senderSocket.send(dataPacket);
+                                        printToLog(dataPacket, "snd ");
+                                    } else {
+                                        // delayPacket();
+                                    }
+                                } else {
+                                    // reorderPacket();
+                                }
+                            } else {
+                                // sendCorruptPacket(tempData);
+                            }
+                        } else {
+                            duplicatePackets(dataPacket);
+                        }
                     } else {
-                        printToLog(dataPacket, "drop");
-                        System.out.println("PACKET DROPPED");
+                        dropPackets(dataPacket);
                     }
 
                     // Note the time the segment was sent and store the packet in the array
@@ -176,7 +226,7 @@ public class Sender {
                     if (lastByteAcked == stp.getAckNum()) {
                         duplicateAcks++;
                         totalDuplicateAcks++;
-                        System.out.println("DUPLICATE ACK RECEIVED HERE. duplicateACKS = " + duplicateAcks);
+                        System.out.println("duplicateACKS = " + duplicateAcks);
                     }
 
                     // Fast transmit procedure, if 3 duplicate ACK's are received then we just retransmit the last
@@ -200,7 +250,6 @@ public class Sender {
                     senderSocket.setSoTimeout(timeoutVal);
 
                 } catch (SocketTimeoutException e) {
-                    // TODO
                     // When a timeout occurs we should resend the last packet that has not yet been acked
                     System.out.println("Sender Socket timed out...");
                     retransmitLastPacket();
@@ -304,7 +353,7 @@ public class Sender {
 
         // Create Syn Packet and then sending it to the receiver
         System.out.println("Creating SYN Packet...");
-        STP connectionRequest = new STP(false, true, false, clientisn, 0);
+        STP connectionRequest = new STP(false, true, false, clientisn, 0, 0);
         DatagramPacket synPacket = new DatagramPacket(connectionRequest.getHeader(), HEADER_SIZE, receiverHost,
                 receiverPort);
         senderSocket.send(synPacket);
@@ -331,7 +380,7 @@ public class Sender {
 
         // Sending out the Ack for the SYNACK segment
         System.out.println("Creating ACK Packet...");
-        STP ackSTP = new STP(true, false, false, clientisn+1, serverisn+1);
+        STP ackSTP = new STP(true, false, false, clientisn+1, serverisn+1,0);
         DatagramPacket ackPacket = new DatagramPacket(ackSTP.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
         printToLog(ackPacket, "snd ");
@@ -350,7 +399,7 @@ public class Sender {
         System.out.println("Starting Network Teardown...");
         // Create a FIN Packet and send it to the Receiver
         System.out.println("Creating FIN Packet...");
-        STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
+        STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum,0);
         DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(finPacket);
         printToLog(finPacket, "snd");
@@ -377,7 +426,7 @@ public class Sender {
 
         // Create ACK Packet for Receiver
         STP finRecHeader = new STP(getHeaderFromPacket(dataPacket).getHeader());
-        STP ackHeader = new STP(true, false, false, currentSeqNum, finRecHeader.getSequenceNum() + 1);
+        STP ackHeader = new STP(true, false, false, currentSeqNum, finRecHeader.getSequenceNum() + 1,0);
         DatagramPacket ackPacket = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
         printToLog(ackPacket, "snd");
@@ -392,11 +441,13 @@ public class Sender {
     }
 
     private static void retransmitLastPacket() throws IOException {
-        System.out.println("Retransmitting package...");
-        int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
-        System.out.println("Attempting to send package in index: " + i);
-        senderSocket.send(packetsSent[i]);
-        printToLog(packetsSent[i], "RXT ");
+        if (lastByteSent - lastByteAcked != 0) {
+            System.out.println("Retransmitting package...");
+            int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
+            System.out.println("Attempting to send package in index: " + i);
+            senderSocket.send(packetsSent[i]);
+            printToLog(packetsSent[i], "RXT ");
+        }
     }
 
     /**
@@ -471,4 +522,32 @@ public class Sender {
         // Print the Acknowledgement Number
         writer.println(String.format("%17s", header.getAckNum()));
     }
+
+    private static void dropPackets(DatagramPacket dataPacket) {
+        printToLog(dataPacket, "drop");
+        System.out.println("PACKET DROPPED");
+    }
+
+    private static void duplicatePackets(DatagramPacket dataPacket) throws IOException {
+        senderSocket.send(dataPacket);
+        printToLog(dataPacket, "snd ");
+        senderSocket.send(dataPacket);
+        printToLog(dataPacket, "dup ");
+        System.out.println("DUPLICATED");
+    }
+
+    private static void sendCorruptPacket(byte[] data) throws IOException {
+        //TODO
+        data[HEADER_SIZE + 1] = (byte) ~data[0];
+        DatagramPacket dataPacket = new DatagramPacket(data, data.length, receiverHost, receiverPort);
+        senderSocket.send(dataPacket);
+        printToLog(dataPacket, "corr");
+    }
+
+    private static long calculateChecksum(byte[] data) {
+        Checksum checksum = new CRC32();
+        checksum.update(data,0, data.length);
+        return checksum.getValue();
+    }
+
 }

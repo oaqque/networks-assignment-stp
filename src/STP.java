@@ -2,34 +2,38 @@ import java.nio.ByteBuffer;
 import java.util.BitSet;
 
 public class STP {
-    public boolean isAck;
-    public boolean isSyn;
-    public boolean isFin;
-    public int sequenceNum;
-    public int ackNum;
+    private boolean isAck;
+    private boolean isSyn;
+    private boolean isFin;
+    private int sequenceNum;
+    private int ackNum;
+    private long checksum;
     private byte[] header;
 
-    private static final int HEADER_SIZE = 9;
+    private static final int HEADER_SIZE = 17;
     private static final int ACK_FLAG = 0;
     private static final int SYN_FLAG = 1;
     private static final int FIN_FLAG = 2;
     private static final int SEQUENCENUM_POS = 0;
     private static final int ACKNUM_POS = 4;
     private static final int FLAG_POS = 8;
+    private static final int CHECKSUM_POS = 9;
     private static final int SEQUENCENUM_SIZE = 4;
     private static final int ACKNUM_SIZE = 4;
     private static final int FLAG_SIZE = 1;
+    private static final int CHECKSUM_SIZE = 8;
     private static final int ARRAY_START = 0;
 
     /*
         Create an STP object when given explicit variables for header construction
      */
-    public STP(boolean isAck, boolean isSyn, boolean isFin, int sequenceNum, int ackNum) {
+    public STP(boolean isAck, boolean isSyn, boolean isFin, int sequenceNum, int ackNum, long checksum) {
         this.isAck = isAck;
         this.isSyn = isSyn;
         this.isFin = isFin;
         this.sequenceNum = sequenceNum;
         this.ackNum = ackNum;
+        this.checksum = checksum;
         this.header = createSTPHeader();
     }
 
@@ -42,10 +46,12 @@ public class STP {
         byte[] sequenceNumByteArray = new byte[SEQUENCENUM_SIZE];
         byte[] ackNumByteArray = new byte[ACKNUM_SIZE];
         byte[] flagsByteArray = new byte[FLAG_SIZE];
+        byte[] checksumByteArray = new byte[CHECKSUM_SIZE];
 
         System.arraycopy(header, SEQUENCENUM_POS, sequenceNumByteArray, ARRAY_START, SEQUENCENUM_SIZE);
         System.arraycopy(header, ACKNUM_POS, ackNumByteArray, ARRAY_START, ACKNUM_SIZE);
         System.arraycopy(header, FLAG_POS, flagsByteArray, ARRAY_START, FLAG_SIZE);
+        System.arraycopy(header, CHECKSUM_POS, checksumByteArray, ARRAY_START, CHECKSUM_SIZE);
         BitSet flagBitSet = BitSet.valueOf(flagsByteArray);
 
         this.isAck = flagBitSet.get(ACK_FLAG);
@@ -53,6 +59,7 @@ public class STP {
         this.isFin = flagBitSet.get(FIN_FLAG);
         this.sequenceNum = byteArrayToInt(sequenceNumByteArray);
         this.ackNum = byteArrayToInt(ackNumByteArray);
+        this.checksum = byteArrayToLong(checksumByteArray);
         this.header = header;
     }
 
@@ -62,6 +69,7 @@ public class STP {
             Sequence Number (4 Bytes)
             Acknowledgement Number (4 Bytes)
             Flags(1 Byte)
+            Checksum (4 Byte)
          */
         byte[] header = new byte[HEADER_SIZE];
 
@@ -81,11 +89,13 @@ public class STP {
             flagBitSet.set(FIN_FLAG);
         }
         byte[] flags = flagBitSet.toByteArray();
+        byte[] checksumByte = longToByteArray(checksum);
 
         // Copy the byte arrays into the header byte array
         System.arraycopy(sequenceNumByte, 0, header, SEQUENCENUM_POS, sequenceNumByte.length);
         System.arraycopy(ackNumByte, 0, header, ACKNUM_POS, ackNumByte.length);
         System.arraycopy(flags, 0, header, FLAG_POS, flags.length);
+        System.arraycopy(checksumByte, 0, header, CHECKSUM_POS, checksumByte.length);
 
         return header;
     }
@@ -112,15 +122,6 @@ public class STP {
     }
 
     /**
-     * Compares the given number with the ackNum of the STP header
-     * @param ackNum
-     * @return
-     */
-    public boolean checkAckNum(int ackNum) {
-        return ackNum == this.ackNum;
-    }
-
-    /**
      * Takes a 4 byte (32 Bit) Java Integer and converts it into a 4 byte array.
      * @param number
      * @return
@@ -144,6 +145,19 @@ public class STP {
         return wrap.getInt();
     }
 
+    private static byte[] longToByteArray(long number) {
+        ByteBuffer buffer = ByteBuffer.allocate(8);
+        buffer.putLong(number);
+        return buffer.array();
+    }
+
+    private static long byteArrayToLong(byte[] longArray) {
+        ByteBuffer buffer = ByteBuffer.allocate(8);
+        buffer.put(longArray);
+        buffer.flip();
+        return buffer.getLong();
+    }
+
     public byte[] getHeader() {
         return this.header;
     }
@@ -154,5 +168,14 @@ public class STP {
 
     public int getAckNum() {
         return this.ackNum;
+    }
+
+    public void setChecksum(long checksum) {
+        this.checksum = checksum;
+        this.header = createSTPHeader();
+    }
+
+    public long getChecksum() {
+        return this.checksum;
     }
 }
