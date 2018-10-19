@@ -149,13 +149,22 @@ public class Sender {
         timer = System.currentTimeMillis();
         writer = new PrintWriter("Sender_log.txt", "UTF-8");
 
+        // Print out the headers for each column into the log
+        writer.print("evnt");
+        writer.print(String.format("%7s", "time"));
+        writer.print(String.format("%7s", "flag"));
+        writer.print(String.format("%17s", "seq num"));
+        writer.print(String.format("%7s", "bytes"));
+        writer.println(String.format("%17s", "ack num"));
+        writer.println("");
+
         return true;
     }
 
     private static boolean handshake() throws IOException {
         // Generate a random initial sequence number for security reasons. The random number generator generates 32
         // bit values
-        int clientisn = randomGenerator.nextInt();
+        int clientisn = randomGenerator.nextInt(100000) + 1;
 
         // Create Syn Packet and then sending it to the receiver
         System.out.println("Creating SYN Packet...");

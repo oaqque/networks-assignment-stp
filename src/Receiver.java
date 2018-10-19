@@ -46,7 +46,9 @@ public class Receiver {
             return;
         }
 
-        DatagramPacket dataPacket = new DatagramPacket(new byte[1024], 1024); // TODO comment on this
+        // A TCP packet has a maximum size of 65535 bytes however in reality, most packets are very much smaller than
+        // this.
+        DatagramPacket dataPacket = new DatagramPacket(new byte[65535], 65535);
         STP packetSTP;
         int segmentSize;
 
@@ -96,7 +98,12 @@ public class Receiver {
 
             receiverSocket.send(ackPacket);
             printToLog(ackPacket, "snd");
-            System.out.println("ACK Packet successfully sent. Ack Num: " + currentAckNum);
+
+            //FOR TESTING
+            STP stp = getHeaderFromPacket(ackPacket);
+
+            System.out.println("ACK Packet successfully sent. Ack Num: " + ackSegment.getAckNum());
+            System.out.println("acKnum in Packet is " + stp.getAckNum());
 
             // Finally check if the packet you just ACKed was a FIN Packet
         }
@@ -123,6 +130,15 @@ public class Receiver {
 
         writer = new PrintWriter("Receiver_log.txt", "UTF-8");
         timer = System.currentTimeMillis();
+
+        // Print out the headers for each column into the log
+        writer.print("evnt");
+        writer.print(String.format("%7s", "time"));
+        writer.print(String.format("%7s", "flag"));
+        writer.print(String.format("%17s", "seq num"));
+        writer.print(String.format("%7s", "bytes"));
+        writer.println(String.format("%17s", "ack num"));
+        writer.println("");
 
         return true;
     }

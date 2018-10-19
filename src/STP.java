@@ -15,7 +15,7 @@ public class STP {
     private static final int FIN_FLAG = 2;
     private static final int SEQUENCENUM_POS = 0;
     private static final int ACKNUM_POS = 4;
-    private static final int FLAG_POS = 5;
+    private static final int FLAG_POS = 8;
     private static final int SEQUENCENUM_SIZE = 4;
     private static final int ACKNUM_SIZE = 4;
     private static final int FLAG_SIZE = 1;
