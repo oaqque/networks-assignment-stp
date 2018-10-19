@@ -55,6 +55,8 @@ public class Sender {
 
         // Stop and Wait Protocol
         while (true) {
+            System.out.println("--------------------------------------------");
+            System.out.println("Starting the Stop and Wait Protocol...");
             if (file.length() > dataSent) {
                 // Create a byte array that will be attached to the UDP Packet to be sent
                 byte[] udpData = new byte[mss + HEADER_SIZE];
@@ -93,6 +95,8 @@ public class Sender {
                     System.out.println("Packet successfully sent! Data Sent: " + dataSent);
                 }
             } else {
+                System.out.println("Stop and Wait Protocol complete");
+                System.out.println("--------------------------------------------");
                 break;
             }
         }
@@ -162,6 +166,8 @@ public class Sender {
     }
 
     private static boolean handshake() throws IOException {
+        System.out.println("--------------------------------------------");
+        System.out.println("Starting Handshake Procedure...");
         // Generate a random initial sequence number for security reasons. The random number generator generates 32
         // bit values
         int clientisn = randomGenerator.nextInt(100000) + 1;
@@ -200,7 +206,7 @@ public class Sender {
         senderSocket.send(ackPacket);
         printToLog(ackPacket, "snd");
         System.out.println("ACK Packet sent, three-way handshake complete");
-
+        System.out.println("--------------------------------------------");
         // Store the correct sequence numbers and acknowledgement numbers
         currentAckNum = serverisn + 1;
         currentSeqNum = clientisn + 1;
@@ -209,8 +215,10 @@ public class Sender {
     }
 
     private static boolean shutdownSender() throws IOException {
+        System.out.println("--------------------------------------------");
+        System.out.println("Starting Network Teardown...");
         // Create a FIN Packet and send it to the Receiver
-        System.out.println("Creating FIN Packet");
+        System.out.println("Creating FIN Packet...");
         STP finHeader = new STP(false, false, true, currentSeqNum, currentAckNum);
         DatagramPacket finPacket = new DatagramPacket(finHeader.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(finPacket);
@@ -243,6 +251,7 @@ public class Sender {
         senderSocket.send(ackPacket);
         printToLog(ackPacket, "snd");
         System.out.println("Final ACK sent. Teardown complete");
+        System.out.println("--------------------------------------------");
 
         senderSocket.close();
         inputReader.close();

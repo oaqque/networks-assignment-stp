@@ -54,6 +54,7 @@ public class Receiver {
 
         // After handshake has been completed, Block the server waiting for packets
         while (true) {
+            System.out.println("--------------------------------------------");
             System.out.println("Block while waiting for data packet...");
             receiverSocket.receive(dataPacket);
             printToLog(dataPacket, "rcv");
@@ -104,8 +105,7 @@ public class Receiver {
 
             System.out.println("ACK Packet successfully sent. Ack Num: " + ackSegment.getAckNum());
             System.out.println("acKnum in Packet is " + stp.getAckNum());
-
-            // Finally check if the packet you just ACKed was a FIN Packet
+            System.out.println("--------------------------------------------");
         }
 
         // Initiate the shutdown between Sender and Receiver
@@ -113,6 +113,8 @@ public class Receiver {
             System.out.println("Failed to teardown network");
             return;
         }
+
+        writeDataOut();
 
     }
 
@@ -144,6 +146,8 @@ public class Receiver {
     }
 
     private static boolean handshake () throws IOException {
+        System.out.println("--------------------------------------------");
+        System.out.println("Starting handshake procedure...");
         // Create a Datagram Packet to store the incoming Syn Packet.
         DatagramPacket synPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
 
@@ -183,11 +187,14 @@ public class Receiver {
         currentSeqNum = receiverisn + 1;
         printToLog(ackPacket, "rcv");
         System.out.println("ACK successfully received, three way handshake complete");
+        System.out.println("--------------------------------------------");
 
         return true;
     }
 
     private static boolean shutdownReceiver(DatagramPacket initFinPacket) throws IOException {
+        System.out.println("--------------------------------------------");
+        System.out.println("FIN Packet received. Initiate network teardown...");
         // After Receiving the FIN Packet we must ACK the Packet
         STP ackHeader = new STP(true, false, false, currentSeqNum, currentAckNum + 1);
         DatagramPacket ackPacket1 = new DatagramPacket(ackHeader.getHeader(), HEADER_SIZE, sourceAddress, sourcePort);
@@ -210,7 +217,25 @@ public class Receiver {
         }
         printToLog(ackPacket2, "rcv");
         System.out.println("ACK Received. Receiver successfully closed");
+        System.out.println("--------------------------------------------");
 
+        return true;
+    }
+
+    private static void copyToBuffer (DatagramPacket datagramPacket) {
+        // Copy the data from the Packet, without the header
+        byte[] data = new byte[mss];
+
+        System.arraycopy(datagramPacket.getData(), HEADER_SIZE, data, 0, mss);
+
+        // Calculate which packet this is in order to place it in the correct location within the buffer
+        STP stp = getHeaderFromPacket(datagramPacket);
+        int packetNum = (stp.getSequenceNum() - senderisn - 1) / mss;
+        dataBuffer[packetNum] = data;
+    }
+
+    private static void writeDataOut() throws IOException {
+        System.out.println("--------------------------------------------");
         // Write the data from the buffer into a file
         System.out.println("Writing data out from buffer to file...");
         BufferedWriter fileWriter = new BufferedWriter(new FileWriter(fileName));
@@ -226,19 +251,7 @@ public class Receiver {
         writer.close();
 
         System.out.println("Data copied successfully into file: " + fileName);
-        return true;
-    }
-
-    private static void copyToBuffer (DatagramPacket datagramPacket) {
-        // Copy the data from the Packet, without the header
-        byte[] data = new byte[mss];
-
-        System.arraycopy(datagramPacket.getData(), HEADER_SIZE, data, 0, mss);
-
-        // Calculate which packet this is in order to place it in the correct location within the buffer
-        STP stp = getHeaderFromPacket(datagramPacket);
-        int packetNum = (stp.getSequenceNum() - senderisn - 1) / mss;
-        dataBuffer[packetNum] = data;
+        System.out.println("--------------------------------------------");
     }
 
     /**
