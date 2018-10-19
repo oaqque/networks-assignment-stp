@@ -104,7 +104,6 @@ public class Receiver {
             STP stp = getHeaderFromPacket(ackPacket);
 
             System.out.println("ACK Packet successfully sent. Ack Num: " + ackSegment.getAckNum());
-            System.out.println("acKnum in Packet is " + stp.getAckNum());
             System.out.println("--------------------------------------------");
         }
 
@@ -185,6 +184,7 @@ public class Receiver {
             receiverSocket.receive(ackPacket);
         }
         currentSeqNum = receiverisn + 1;
+        currentAckNum = senderisn + 1;
         printToLog(ackPacket, "rcv");
         System.out.println("ACK successfully received, three way handshake complete");
         System.out.println("--------------------------------------------");

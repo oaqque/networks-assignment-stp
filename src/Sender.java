@@ -28,6 +28,9 @@ public class Sender {
     private static int dataSent;                // The amount of bytes that have been sent
     private static long timer;                  // A note of the time that the sender started sending
     private static PrintWriter writer;          // A writer for outputting a Log as text
+    private static int unackedBytes;            // The number of bytes that have yet to be acknowledged
+    private static int lastByteAcked;
+    private static int lastByteSent;
 
     private static final int HEADER_SIZE = 9;
     private static final int ACK_FLAG = 0;
@@ -54,10 +57,13 @@ public class Sender {
         }
 
         // Stop and Wait Protocol
+        System.out.println("--------------------------------------------");
+        System.out.println("Starting the Stop and Wait Protocol...");
         while (true) {
-            System.out.println("--------------------------------------------");
-            System.out.println("Starting the Stop and Wait Protocol...");
-            if (file.length() > dataSent) {
+            System.out.println("...==...");
+            // Send data if there is still data left in the file to be sent, however if the unackedBytes has eclipsed
+            // the maximum window size then stop sending and wait
+            if (file.length() > dataSent && unackedBytes < mws) {
                 // Create a byte array that will be attached to the UDP Packet to be sent
                 byte[] udpData = new byte[mss + HEADER_SIZE];
 
@@ -83,6 +89,7 @@ public class Sender {
                     // Update the book keeping
                     currentSeqNum += tempData.length - HEADER_SIZE;
                     dataSent += tempData.length - HEADER_SIZE;
+
                     System.out.println("Packet successfully sent! Data Sent: " + dataSent);
                 } else {
                     DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
@@ -92,13 +99,43 @@ public class Sender {
                     // Update the book keeping
                     currentSeqNum += udpData.length - HEADER_SIZE;
                     dataSent += udpData.length - HEADER_SIZE;
+
                     System.out.println("Packet successfully sent! Data Sent: " + dataSent);
                 }
+
+                // After sending the data update the lastByteSent with the sequence number
+                lastByteSent = currentSeqNum;
+                System.out.println("last Byte sent was " + lastByteSent);
+
             } else {
-                System.out.println("Stop and Wait Protocol complete");
-                System.out.println("--------------------------------------------");
-                break;
+
+                if (unackedBytes == 0) {
+                    // End the Stop and Wait Protocol if all bytes of data have been sent and no more bytes are
+                    // waiting to be acknowledged.
+                    System.out.println("Stop and Wait Protocol complete");
+                    System.out.println("--------------------------------------------");
+                    break;
+                }
+
+                // Otherwise start accepting ACK packets from the Receiver, block until an ACK is received
+                try {
+                    System.out.println("Blocking while waiting for ACK...");
+                    DatagramPacket ackPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
+                    senderSocket.receive(ackPacket);
+                    printToLog(ackPacket, "rcv");
+
+                    // Update book keeping
+                    STP stp = getHeaderFromPacket(ackPacket);
+                    lastByteAcked = stp.getAckNum();
+                    System.out.println("ACK Received " + stp.getAckNum());
+                } catch (SocketTimeoutException e) {
+                    // TODO
+                    e.printStackTrace();
+                }
             }
+
+            unackedBytes = lastByteSent - lastByteAcked;
+            System.out.println("UnackedBytes currently " + unackedBytes);
         }
 
         // File has been completely sent at this point. Initiate the shutdown of the connection
