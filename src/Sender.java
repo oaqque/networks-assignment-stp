@@ -126,7 +126,7 @@ public class Sender {
                                     // reorderPacket();
                                 }
                             } else {
-                                // sendCorruptPacket(tempData);
+                                sendCorruptPacket(dataPacket);
                             }
                         } else {
                             duplicatePackets(dataPacket);
@@ -154,7 +154,6 @@ public class Sender {
                     System.out.println("Checksum calculated as " + checksum);
                     stp.setChecksum(checksum);
                     System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
-
                     DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
 
                     // PLD module
@@ -172,7 +171,7 @@ public class Sender {
                                     // reorderPacket();
                                 }
                             } else {
-                                // sendCorruptPacket(tempData);
+                                sendCorruptPacket(dataPacket);
                             }
                         } else {
                             duplicatePackets(dataPacket);
@@ -240,7 +239,7 @@ public class Sender {
 
                     // When the ACK is received, we recalculate the timeout value and set it for the socket
                     // Calculate the position in the segment sent array to get the time the original packet was sent
-                    int i = (int) Math.ceil((stp.getAckNum() - mss - initialSequenceNum - 1) / (double) mss);
+                    int i = (int) Math.ceil((stp.getAckNum() - mss - initialSequenceNum) / (double) mss);
                     long sampleRTT = currentTime - timeSegmentSent[i];
                     System.out.println("sampleRTT calculated as: " + sampleRTT);
 
@@ -536,12 +535,16 @@ public class Sender {
         System.out.println("DUPLICATED");
     }
 
-    private static void sendCorruptPacket(byte[] data) throws IOException {
-        //TODO
-        data[HEADER_SIZE + 1] = (byte) ~data[0];
-        DatagramPacket dataPacket = new DatagramPacket(data, data.length, receiverHost, receiverPort);
+    private static void sendCorruptPacket(DatagramPacket packet) throws IOException {
+        byte[] packetData = new byte[packet.getData().length];
+        System.arraycopy(packet.getData(), 0, packetData, 0, packetData.length);
+
+        // Corrupts the first byte after the Header by flipping all the bits
+        packetData[HEADER_SIZE + 1] = (byte) ~packetData[HEADER_SIZE + 1];
+        DatagramPacket dataPacket = new DatagramPacket(packetData, packetData.length, receiverHost, receiverPort);
         senderSocket.send(dataPacket);
         printToLog(dataPacket, "corr");
+        System.out.println("CORRUPTED");
     }
 
     private static long calculateChecksum(byte[] data) {

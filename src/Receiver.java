@@ -63,11 +63,6 @@ public class Receiver {
             System.out.println("A Packet was received");
             packetSTP = getHeaderFromPacket(dataPacket);
 
-            // Discard all corrupted packets
-            if (isCorrupted(dataPacket)) {
-                continue;
-            }
-
             // Check if the packet received is a FIN Packet, if so then break and initiate shutdown
             if (checkSTPHeaderFlags(dataPacket, FIN_FLAG)) {
                 System.out.println("FIN Packet received, initiating shutdown");
@@ -81,6 +76,11 @@ public class Receiver {
                 mss = dataPacket.getLength() - HEADER_SIZE;
                 dataBuffer = new byte[mss][];
                 packetBuffer = new DatagramPacket[mss];
+            }
+
+            // Discard all corrupted packets
+            if (isCorrupted(dataPacket)) {
+                continue;
             }
 
             // Since it is not a FIN Packet then we simply ACK the packet.
@@ -363,6 +363,7 @@ public class Receiver {
         // Get the checksum from the header of the packet
         STP stpHeader = getHeaderFromPacket(datagramPacket);
         if (calculatedChecksum != stpHeader.getChecksum()) {
+            System.out.println("Data is corrupted! Packet dropped...");
             return true;
         } else {
             return false;
