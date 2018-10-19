@@ -41,9 +41,11 @@ public class Sender {
 
     private static int duplicateAcks;           // Counts the current number of duplicate ACK's received
     private static int totalDuplicateAcks;      // Counts the total number of duplicate ACK's received to log
+    private static int forwardingCount;         // Count of number of packets forwarded
 
     private static DatagramPacket[] packetsSent;  // This array will store the packets sent to make it easier to
     // resend dropped packets
+    private static DatagramPacket savedPacket;  // For the PLD to save the packet for re-Ordered sending
 
     private static final int HEADER_SIZE = 17;
     private static final int ACK_FLAG = 0;
@@ -117,13 +119,12 @@ public class Sender {
                             if (randomGenerator.nextDouble() > pCorrupt) {
                                 if (randomGenerator.nextDouble() > pOrder) {
                                     if (randomGenerator.nextDouble() > pDelay) {
-                                        senderSocket.send(dataPacket);
-                                        printToLog(dataPacket, "snd ");
+                                        sendPacket(dataPacket, "snd ");
                                     } else {
                                         // delayPacket();
                                     }
                                 } else {
-                                    // reorderPacket();
+                                    reorderPacket(dataPacket);
                                 }
                             } else {
                                 sendCorruptPacket(dataPacket);
@@ -162,13 +163,12 @@ public class Sender {
                             if (randomGenerator.nextDouble() > pCorrupt) {
                                 if (randomGenerator.nextDouble() > pOrder) {
                                     if (randomGenerator.nextDouble() > pDelay) {
-                                        senderSocket.send(dataPacket);
-                                        printToLog(dataPacket, "snd ");
+                                        sendPacket(dataPacket, "snd ");
                                     } else {
                                         // delayPacket();
                                     }
                                 } else {
-                                    // reorderPacket();
+                                    reorderPacket(dataPacket);
                                 }
                             } else {
                                 sendCorruptPacket(dataPacket);
@@ -444,8 +444,7 @@ public class Sender {
             System.out.println("Retransmitting package...");
             int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
             System.out.println("Attempting to send package in index: " + i);
-            senderSocket.send(packetsSent[i]);
-            printToLog(packetsSent[i], "RXT ");
+            sendPacket(packetsSent[i], "RXT ");
         }
     }
 
@@ -528,10 +527,8 @@ public class Sender {
     }
 
     private static void duplicatePackets(DatagramPacket dataPacket) throws IOException {
-        senderSocket.send(dataPacket);
-        printToLog(dataPacket, "snd ");
-        senderSocket.send(dataPacket);
-        printToLog(dataPacket, "dup ");
+        sendPacket(dataPacket, "snd ");
+        sendPacket(dataPacket, "dup ");
         System.out.println("DUPLICATED");
     }
 
@@ -542,8 +539,7 @@ public class Sender {
         // Corrupts the first byte after the Header by flipping all the bits
         packetData[HEADER_SIZE + 1] = (byte) ~packetData[HEADER_SIZE + 1];
         DatagramPacket dataPacket = new DatagramPacket(packetData, packetData.length, receiverHost, receiverPort);
-        senderSocket.send(dataPacket);
-        printToLog(dataPacket, "corr");
+        sendPacket(dataPacket, "corr");
         System.out.println("CORRUPTED");
     }
 
@@ -551,6 +547,36 @@ public class Sender {
         Checksum checksum = new CRC32();
         checksum.update(data,0, data.length);
         return checksum.getValue();
+    }
+
+    private static void reorderPacket(DatagramPacket packet) throws IOException {
+        // First check if there is a packet already being reordered, if there is then send it first and then replace
+        // it with the new reordered packet
+        if (savedPacket != null) {
+            senderSocket.send(savedPacket);
+            printToLog(savedPacket, "rord");
+            forwardingCount = 0;
+        }
+        savedPacket = packet;
+    }
+
+    private static void sendPacket(DatagramPacket packet, String event) throws IOException {
+        // Sends the packet and increments forwarding count only if there is a packet saved
+        senderSocket.send(packet);
+        printToLog(packet, event);
+
+        if (savedPacket != null) {
+            forwardingCount++;
+        }
+
+        // Checks if the forwardingCount has reached maxOrder. If it has reached maxOrder then we also send the
+        // reordered Packet and reset the savedPacket to null.
+        if (forwardingCount == maxOrder) {
+            senderSocket.send(savedPacket);
+            printToLog(savedPacket, "rord");
+            forwardingCount = 0;
+            savedPacket = null;
+        }
     }
 
 }
