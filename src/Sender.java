@@ -1,4 +1,3 @@
-import javax.xml.crypto.Data;
 import java.io.*;
 import java.net.*;
 import java.util.Random;
@@ -31,6 +30,15 @@ public class Sender {
     private static int unackedBytes;            // The number of bytes that have yet to be acknowledged
     private static int lastByteAcked;
     private static int lastByteSent;
+    private static int initialSequenceNum;      // Initial sequence number
+
+    private static int timeoutVal;              // Timeout value given to the socket
+    private static double estimatedRTT;         // Used to calculate the timeout value for the socket
+    private static double devRTT;               // Used to calculate the timeout value for the socket
+    private static long[] timeSegmentSent;      // This array will tell what time a segment was sent
+
+    private static DatagramPacket[] packetsSent;  // This array will store the packets sent to make it easier to
+    // resend dropped packets
 
     private static final int HEADER_SIZE = 9;
     private static final int ACK_FLAG = 0;
@@ -59,6 +67,11 @@ public class Sender {
         // Stop and Wait Protocol
         System.out.println("--------------------------------------------");
         System.out.println("Starting the Stop and Wait Protocol...");
+
+        // This counter will be used to fill in the segment Sent array to note down at what time each segment was
+        // originally sent since retransmitted segment will not be be used to calculate sample RTT
+        int counter = 0;
+
         while (true) {
             System.out.println("...==...");
             // Send data if there is still data left in the file to be sent, however if the unackedBytes has eclipsed
@@ -86,6 +99,10 @@ public class Sender {
                     senderSocket.send(dataPacket);
                     printToLog(dataPacket, "snd");
 
+                    // Note the time the segment was sent and store the packet in the array
+                    timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
+                    packetsSent[counter] = dataPacket;
+
                     // Update the book keeping
                     currentSeqNum += tempData.length - HEADER_SIZE;
                     dataSent += tempData.length - HEADER_SIZE;
@@ -96,6 +113,10 @@ public class Sender {
                     senderSocket.send(dataPacket);
                     printToLog(dataPacket, "snd");
 
+                    // Note the time the segment was sent and store the packet in the array
+                    timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
+                    packetsSent[counter] = dataPacket;
+
                     // Update the book keeping
                     currentSeqNum += udpData.length - HEADER_SIZE;
                     dataSent += udpData.length - HEADER_SIZE;
@@ -105,6 +126,7 @@ public class Sender {
 
                 // After sending the data update the lastByteSent with the sequence number
                 lastByteSent = currentSeqNum;
+                counter++;
                 System.out.println("last Byte sent was " + lastByteSent);
 
             } else {
@@ -122,16 +144,35 @@ public class Sender {
                     System.out.println("Blocking while waiting for ACK...");
                     DatagramPacket ackPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
                     senderSocket.receive(ackPacket);
+                    long currentTime = System.currentTimeMillis(); // Note time the packet was received
                     printToLog(ackPacket, "rcv");
 
                     // Update book keeping
                     STP stp = getHeaderFromPacket(ackPacket);
                     lastByteAcked = stp.getAckNum();
-                    System.out.println("ACK Received " + stp.getAckNum());
+                    System.out.println("ACK Received: " + stp.getAckNum());
+
+                    // When the ACK is received, we recalculate the timeout value and set it for the socket
+                    // Calculate the position in the segment sent array to get the time the original packet was sent
+                    int i = (int) Math.ceil((stp.getAckNum() - mss - initialSequenceNum - 1) / (double) mss);
+                    long sampleRTT = currentTime - timeSegmentSent[i];
+                    System.out.println("sampleRTT calculated as: " + sampleRTT);
+
+                    estimatedRTT = 0.875 * estimatedRTT + 0.125 * sampleRTT;
+                    devRTT = 0.75 * devRTT + 0.25 * Math.abs(sampleRTT - estimatedRTT);
+                    timeoutVal = (int) (estimatedRTT + gamma * devRTT);
+                    senderSocket.setSoTimeout(timeoutVal);
+
                 } catch (SocketTimeoutException e) {
                     // TODO
-                    e.printStackTrace();
-                }
+                    // When a timeout occurs we should resend the last packet that has not yet been acked
+                    System.out.println("Sender Socket timed out...");
+                    System.out.println("Retransmitting package...");
+                    int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
+                    senderSocket.send(packetsSent[i]);
+                    printToLog(packetsSent[i], "RXT");
+                    continue;
+                    }
             }
 
             unackedBytes = lastByteSent - lastByteAcked;
@@ -176,8 +217,14 @@ public class Sender {
 
         randomGenerator = new Random(seed);
 
+        // Initialise the estimatedRTT and devRTT to 500ms and 250ms as noted in the assignment spec
+        estimatedRTT = 500;
+        devRTT = 250;
+        timeoutVal = (int) (estimatedRTT + gamma * devRTT);
+
         try {
             senderSocket = new DatagramSocket();
+            senderSocket.setSoTimeout(timeoutVal);
         } catch (SocketException e) {
             System.out.println("Failed to setup UDP socket");
             e.printStackTrace();
@@ -187,6 +234,14 @@ public class Sender {
         file = new File(fileName);
         inputReader = new FileInputStream(file);
         dataSent = 0;
+
+        // The number of segments required to send the file will be the length of the file divided by the maximum
+        // segment size + 1 for if there is a remainder
+        int numberOfSegments = (int) (file.length() / mss) + 1;
+        timeSegmentSent = new long[numberOfSegments];
+        packetsSent = new DatagramPacket[numberOfSegments];
+
+        // Create a timer for the writer
         timer = System.currentTimeMillis();
         writer = new PrintWriter("Sender_log.txt", "UTF-8");
 
@@ -208,6 +263,7 @@ public class Sender {
         // Generate a random initial sequence number for security reasons. The random number generator generates 32
         // bit values
         int clientisn = randomGenerator.nextInt(100000) + 1;
+        initialSequenceNum = clientisn;
 
         // Create Syn Packet and then sending it to the receiver
         System.out.println("Creating SYN Packet...");
@@ -247,6 +303,7 @@ public class Sender {
         // Store the correct sequence numbers and acknowledgement numbers
         currentAckNum = serverisn + 1;
         currentSeqNum = clientisn + 1;
+        lastByteAcked = currentSeqNum;
 
         return true;
     }
