@@ -1,6 +1,8 @@
 import java.io.*;
 import java.net.*;
 import java.util.Random;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
@@ -17,7 +19,7 @@ public class Sender {
     private static double pOrder;               // Probability that segment not dropped/duped/corrupted is reordered
     private static int maxOrder;                // Maximum number of packets that can be held for reordering (1-6)
     private static double pDelay;               // Probability that segment not dropped/dup/corpt/reordered is delayed
-    private static int maxDelay;                // The maximum delay in ms experienced by segments that are delayed
+    private static long maxDelay;                // The maximum delay in ms experienced by segments that are delayed
     private static long seed;                   // The seed used for random number generator
 
     private static Random randomGenerator;      // The Random Number generator
@@ -45,7 +47,7 @@ public class Sender {
 
     private static DatagramPacket[] packetsSent;  // This array will store the packets sent to make it easier to
     // resend dropped packets
-    private static DatagramPacket savedPacket;  // For the PLD to save the packet for re-Ordered sending
+    private static DatagramPacket reorderedPacket;  // For the PLD to save the packet for re-Ordered sending
 
     private static final int HEADER_SIZE = 17;
     private static final int ACK_FLAG = 0;
@@ -121,7 +123,7 @@ public class Sender {
                                     if (randomGenerator.nextDouble() > pDelay) {
                                         sendPacket(dataPacket, "snd ");
                                     } else {
-                                        // delayPacket();
+                                        delayPacket(dataPacket);
                                     }
                                 } else {
                                     reorderPacket(dataPacket);
@@ -165,7 +167,7 @@ public class Sender {
                                     if (randomGenerator.nextDouble() > pDelay) {
                                         sendPacket(dataPacket, "snd ");
                                     } else {
-                                        // delayPacket();
+                                        delayPacket(dataPacket);
                                     }
                                 } else {
                                     reorderPacket(dataPacket);
@@ -292,7 +294,7 @@ public class Sender {
         pOrder = Double.parseDouble(args[9]);
         maxOrder = Integer.parseInt(args[10]);
         pDelay = Double.parseDouble(args[11]);
-        maxDelay = Integer.parseInt(args[12]);
+        maxDelay = Long.parseLong(args[12]);
         seed = Integer.parseInt(args[13]);
 
         randomGenerator = new Random(seed);
@@ -552,12 +554,12 @@ public class Sender {
     private static void reorderPacket(DatagramPacket packet) throws IOException {
         // First check if there is a packet already being reordered, if there is then send it first and then replace
         // it with the new reordered packet
-        if (savedPacket != null) {
-            senderSocket.send(savedPacket);
-            printToLog(savedPacket, "rord");
+        if (reorderedPacket != null) {
+            senderSocket.send(reorderedPacket);
+            printToLog(reorderedPacket, "rord");
             forwardingCount = 0;
         }
-        savedPacket = packet;
+        reorderedPacket = packet;
     }
 
     private static void sendPacket(DatagramPacket packet, String event) throws IOException {
@@ -565,18 +567,39 @@ public class Sender {
         senderSocket.send(packet);
         printToLog(packet, event);
 
-        if (savedPacket != null) {
+        if (reorderedPacket != null) {
             forwardingCount++;
         }
 
         // Checks if the forwardingCount has reached maxOrder. If it has reached maxOrder then we also send the
-        // reordered Packet and reset the savedPacket to null.
-        if (forwardingCount == maxOrder) {
-            senderSocket.send(savedPacket);
-            printToLog(savedPacket, "rord");
+        // reordered Packet and reset the reorderedPacket to null.
+        if (forwardingCount == maxOrder && maxOrder != 0) {
+            senderSocket.send(reorderedPacket);
+            printToLog(reorderedPacket, "rord");
             forwardingCount = 0;
-            savedPacket = null;
+            reorderedPacket = null;
         }
+    }
+
+    private static void delayPacket(final DatagramPacket datagramPacket) {
+        // Generate a random delay between 0 and maxDelay
+        long x = 0;
+        long y = maxDelay;
+        long randomDelay = x + ((long)(randomGenerator.nextDouble()*(y-x)));
+
+        // Create a timer and schedule the task of sending the delayed packet
+        Timer timer = new Timer();
+        TimerTask task = new TimerTask() {
+            @Override
+            public void run() {
+                try {
+                    sendPacket(datagramPacket, "dely");
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        timer.schedule(task, randomDelay);
     }
 
 }
