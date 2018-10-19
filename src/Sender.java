@@ -37,6 +37,9 @@ public class Sender {
     private static double devRTT;               // Used to calculate the timeout value for the socket
     private static long[] timeSegmentSent;      // This array will tell what time a segment was sent
 
+    private static int duplicateAcks;           // Counts the current number of duplicate ACK's received
+    private static int totalDuplicateAcks;      // Counts the total number of duplicate ACK's received to log
+
     private static DatagramPacket[] packetsSent;  // This array will store the packets sent to make it easier to
     // resend dropped packets
 
@@ -73,7 +76,7 @@ public class Sender {
         int counter = 0;
 
         while (true) {
-            System.out.println("...==...");
+            System.out.println(".....................");
             // Send data if there is still data left in the file to be sent, however if the unackedBytes has eclipsed
             // the maximum window size then stop sending and wait
             if (file.length() > dataSent && unackedBytes < mws) {
@@ -109,10 +112,13 @@ public class Sender {
                     // Note the time the segment was sent and store the packet in the array
                     timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
                     packetsSent[counter] = dataPacket;
+                    System.out.println("Packet stored in index " + counter);
 
                     // Update the book keeping
                     currentSeqNum += tempData.length - HEADER_SIZE;
                     dataSent += tempData.length - HEADER_SIZE;
+
+                    System.out.println("Packet successfully sent! Data Sent: " + dataSent);
 
                 } else {
                     DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
@@ -128,6 +134,7 @@ public class Sender {
                     // Note the time the segment was sent and store the packet in the array
                     timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
                     packetsSent[counter] = dataPacket;
+                    System.out.println("Packet stored in index " + counter);
 
                     // Update the book keeping
                     currentSeqNum += udpData.length - HEADER_SIZE;
@@ -161,7 +168,24 @@ public class Sender {
 
                     // Update book keeping
                     STP stp = getHeaderFromPacket(ackPacket);
-                    lastByteAcked = stp.getAckNum();
+                    if (stp.getAckNum() > lastByteAcked) {
+                        lastByteAcked = stp.getAckNum();
+                    }
+
+                    // Check if this is a duplicate ACK
+                    if (lastByteAcked == stp.getAckNum()) {
+                        duplicateAcks++;
+                        totalDuplicateAcks++;
+                        System.out.println("DUPLICATE ACK RECEIVED HERE. duplicateACKS = " + duplicateAcks);
+                    }
+
+                    // Fast transmit procedure, if 3 duplicate ACK's are received then we just retransmit the last
+                    // package and reset the number of duplicate ACK's received.
+                    if (duplicateAcks == 3) {
+                        retransmitLastPacket();
+                        duplicateAcks = 0;
+                    }
+
                     System.out.println("ACK Received: " + stp.getAckNum());
 
                     // When the ACK is received, we recalculate the timeout value and set it for the socket
@@ -179,11 +203,7 @@ public class Sender {
                     // TODO
                     // When a timeout occurs we should resend the last packet that has not yet been acked
                     System.out.println("Sender Socket timed out...");
-                    System.out.println("Retransmitting package...");
-                    int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
-                    senderSocket.send(packetsSent[i]);
-                    printToLog(packetsSent[i], "RXT ");
-                    continue;
+                    retransmitLastPacket();
                     }
             }
 
@@ -249,9 +269,14 @@ public class Sender {
 
         // The number of segments required to send the file will be the length of the file divided by the maximum
         // segment size + 1 for if there is a remainder
-        int numberOfSegments = (int) (file.length() / mss) + 1;
+        int numberOfSegments = (int) Math.ceil((file.length() / (double) mss));
+        System.out.println("Number of Segments " + numberOfSegments);
         timeSegmentSent = new long[numberOfSegments];
         packetsSent = new DatagramPacket[numberOfSegments];
+
+        // Initialise the duplicate ACK counters
+        duplicateAcks = 0;
+        totalDuplicateAcks = 0;
 
         // Create a timer for the writer
         timer = System.currentTimeMillis();
@@ -364,6 +389,14 @@ public class Sender {
         writer.close();
 
         return true;
+    }
+
+    private static void retransmitLastPacket() throws IOException {
+        System.out.println("Retransmitting package...");
+        int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
+        System.out.println("Attempting to send package in index: " + i);
+        senderSocket.send(packetsSent[i]);
+        printToLog(packetsSent[i], "RXT ");
     }
 
     /**

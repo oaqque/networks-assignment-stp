@@ -16,6 +16,7 @@ public class Receiver {
     private static int currentAckNum;
     private static int mss;
     private static byte[][] dataBuffer;
+    private static DatagramPacket[] packetBuffer;
     private static int senderisn;
     private static int receiverisn;
     private static PrintWriter writer;
@@ -73,11 +74,7 @@ public class Receiver {
                 System.out.println("This is the first packet...");
                 mss = dataPacket.getLength() - HEADER_SIZE;
                 dataBuffer = new byte[mss][];
-            }
-
-            // Check if the packets are out of order...
-            if (currentAckNum != packetSTP.getSequenceNum()) {
-                // TODO
+                packetBuffer = new DatagramPacket[mss];
             }
 
             // Since it is not a FIN Packet then we simply ACK the packet.
@@ -88,9 +85,20 @@ public class Receiver {
             copyToBuffer(dataPacket);
             System.out.println("Data stored!");
 
-            segmentSize = dataPacket.getLength() - HEADER_SIZE;
-            currentAckNum += segmentSize;
-            currentSeqNum += 1;
+            // Check if the packets are out of order, if it is out of order then our currentAckNum does not change
+            // and we retransmit the last ack. Else we will ack the most recent byte
+            if (currentAckNum != packetSTP.getSequenceNum()) {
+                System.out.println("This packet was out of order...");
+                System.out.println("Retransmitting previous ack");
+                printBuffer();
+            } else {
+                System.out.println("Packet is in order...");
+                System.out.println("ACK the cumulative bytes");
+
+                segmentSize = getLatestPacket().getLength() - HEADER_SIZE;
+                currentAckNum = getHeaderFromPacket(getLatestPacket()).getSequenceNum() + segmentSize;
+                currentSeqNum = getHeaderFromPacket(getLatestPacket()).getAckNum() + 1;
+            }
 
             System.out.println("Creating ACK Packet...");
             STP ackSegment = new STP(true, false, false, currentSeqNum, currentAckNum);
@@ -99,9 +107,6 @@ public class Receiver {
 
             receiverSocket.send(ackPacket);
             printToLog(ackPacket, "snd");
-
-            //FOR TESTING
-            STP stp = getHeaderFromPacket(ackPacket);
 
             System.out.println("ACK Packet successfully sent. Ack Num: " + ackSegment.getAckNum());
             System.out.println("--------------------------------------------");
@@ -232,6 +237,7 @@ public class Receiver {
         STP stp = getHeaderFromPacket(datagramPacket);
         int packetNum = (stp.getSequenceNum() - senderisn - 1) / mss;
         dataBuffer[packetNum] = data;
+        packetBuffer[packetNum] = datagramPacket;
     }
 
     private static void writeDataOut() throws IOException {
@@ -325,5 +331,25 @@ public class Receiver {
 
         // Print the Acknowledgement Number
         writer.println(String.format("%17s", header.getAckNum()));
+    }
+
+    private static DatagramPacket getLatestPacket() {
+        DatagramPacket datagramPacket = null;
+        byte[] temp;
+        int i = 0;
+        while (packetBuffer[i] != null) {
+            datagramPacket = packetBuffer[i];
+            i++;
+        }
+
+        return datagramPacket;
+    }
+    // FOR TESTING // TODO REMOVE
+    private static void printBuffer() {
+        for (int i = 0; i < dataBuffer.length; i++) {
+            if (dataBuffer[i] != null) {
+                System.out.println(i + " cell has something in it");
+            }
+        }
     }
 }
