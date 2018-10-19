@@ -265,33 +265,16 @@ public class Receiver {
         System.out.println("--------------------------------------------");
     }
 
-    /**
-     * Checks the STP header, returning whether or not the desired flag has been checked.
-     * @param packet
-     * @param flag
-     * @return
-     */
     private static boolean checkSTPHeaderFlags (DatagramPacket packet, int flag) {
         STP header = getHeaderFromPacket(packet);
         return header.checkFlag(flag);
     }
 
-    /**
-     * Checks the STP header, returning whether or not the ACKNum is as desired.
-     * @param packet
-     * @param ackNum
-     * @return
-     */
     private static boolean checkSTPAckNum (DatagramPacket packet, int ackNum) {
         STP header = getHeaderFromPacket(packet);
         return header.getAckNum() == ackNum;
     }
 
-    /**
-     * Gets the STP header from a Datagram Packet
-     * @param datagramPacket
-     * @return
-     */
     private static STP getHeaderFromPacket (DatagramPacket datagramPacket) {
         byte[] packetData = datagramPacket.getData();
         byte[] header = new byte[HEADER_SIZE];

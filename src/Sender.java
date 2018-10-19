@@ -1,8 +1,6 @@
 import java.io.*;
 import java.net.*;
-import java.util.Random;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
@@ -48,6 +46,9 @@ public class Sender {
     private static DatagramPacket[] packetsSent;  // This array will store the packets sent to make it easier to
     // resend dropped packets
     private static DatagramPacket reorderedPacket;  // For the PLD to save the packet for re-Ordered sending
+
+    private static LinkedList<Timer> timers;    // This linked list will be used to store all the timers created
+    // during the execution of the program and close them all during shutdown.
 
     private static final int HEADER_SIZE = 17;
     private static final int ACK_FLAG = 0;
@@ -115,33 +116,8 @@ public class Sender {
                     DatagramPacket dataPacket = new DatagramPacket(tempData, tempData.length, receiverHost,
                             receiverPort);
 
-                    // PLD module
-                    if (randomGenerator.nextDouble() > pDrop) {
-                        if (randomGenerator.nextDouble() > pDuplicate) {
-                            if (randomGenerator.nextDouble() > pCorrupt) {
-                                if (randomGenerator.nextDouble() > pOrder) {
-                                    if (randomGenerator.nextDouble() > pDelay) {
-                                        sendPacket(dataPacket, "snd ");
-                                    } else {
-                                        delayPacket(dataPacket);
-                                    }
-                                } else {
-                                    reorderPacket(dataPacket);
-                                }
-                            } else {
-                                sendCorruptPacket(dataPacket);
-                            }
-                        } else {
-                            duplicatePackets(dataPacket);
-                        }
-                    } else {
-                        dropPackets(dataPacket);
-                    }
-
-                    // Note the time the segment was sent and store the packet in the array
-                    timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
-                    packetsSent[counter] = dataPacket;
-                    System.out.println("Packet stored in index " + counter);
+                    pldModule(dataPacket);
+                    storePacket(dataPacket, counter);
 
                     // Update the book keeping
                     currentSeqNum += tempData.length - HEADER_SIZE;
@@ -159,33 +135,8 @@ public class Sender {
                     System.arraycopy(stp.getHeader(), 0, udpData, 0, HEADER_SIZE);
                     DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
 
-                    // PLD module
-                    if (randomGenerator.nextDouble() > pDrop) {
-                        if (randomGenerator.nextDouble() > pDuplicate) {
-                            if (randomGenerator.nextDouble() > pCorrupt) {
-                                if (randomGenerator.nextDouble() > pOrder) {
-                                    if (randomGenerator.nextDouble() > pDelay) {
-                                        sendPacket(dataPacket, "snd ");
-                                    } else {
-                                        delayPacket(dataPacket);
-                                    }
-                                } else {
-                                    reorderPacket(dataPacket);
-                                }
-                            } else {
-                                sendCorruptPacket(dataPacket);
-                            }
-                        } else {
-                            duplicatePackets(dataPacket);
-                        }
-                    } else {
-                        dropPackets(dataPacket);
-                    }
-
-                    // Note the time the segment was sent and store the packet in the array
-                    timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
-                    packetsSent[counter] = dataPacket;
-                    System.out.println("Packet stored in index " + counter);
+                    pldModule(dataPacket);
+                    storePacket(dataPacket, counter);
 
                     // Update the book keeping
                     currentSeqNum += udpData.length - HEADER_SIZE;
@@ -266,14 +217,9 @@ public class Sender {
             System.out.println("Failed to teardown network");
             return;
         }
+
     }
 
-    /**
-     * Ensures that arguments are correctly parsed to the sender and in the correct format. Also sets up the random
-     * number generator and sender UDP socket.
-     * @param args
-     * @return
-     */
     private static boolean bootstrapSender (String[] args) throws FileNotFoundException, UnsupportedEncodingException {
         try {
             receiverHost = InetAddress.getByName(args[0]);
@@ -331,6 +277,7 @@ public class Sender {
         // Create a timer for the writer
         timer = System.currentTimeMillis();
         writer = new PrintWriter("Sender_log.txt", "UTF-8");
+        timers = new LinkedList<>();
 
         // Print out the headers for each column into the log
         writer.print("evnt");
@@ -438,6 +385,13 @@ public class Sender {
         inputReader.close();
         writer.close();
 
+        int i = 0;
+        while (i < timers.size()) {
+            Timer timer = timers.get(i);
+            timer.cancel();
+            i++;
+        }
+
         return true;
     }
 
@@ -450,33 +404,16 @@ public class Sender {
         }
     }
 
-    /**
-     * Checks the STP header, returning whether or not the desired flag has been checked.
-     * @param packet
-     * @param flag
-     * @return
-     */
     private static boolean checkSTPHeaderFlags(DatagramPacket packet, int flag) {
         STP header = getHeaderFromPacket(packet);
         return header.checkFlag(flag);
     }
 
-    /**
-     * Checks the STP header, returning whether or not the ACKNum is as desired.
-     * @param packet
-     * @param ackNum
-     * @return
-     */
     private static boolean checkSTPAckNum(DatagramPacket packet, int ackNum) {
         STP header = getHeaderFromPacket(packet);
         return header.getAckNum() == ackNum;
     }
 
-    /**
-     * Gets the STP header from a Datagram Packet
-     * @param packet
-     * @return
-     */
     private static STP getHeaderFromPacket(DatagramPacket packet) {
         byte[] packetData = packet.getData();
         byte[] header = new byte[HEADER_SIZE];
@@ -600,6 +537,40 @@ public class Sender {
             }
         };
         timer.schedule(task, randomDelay);
+        // Add the timer to the linked list
+        timers.add(timer);
+    }
+
+    private static void pldModule(DatagramPacket dataPacket) throws IOException {
+        // PLD module
+        if (randomGenerator.nextDouble() > pDrop) {
+            if (randomGenerator.nextDouble() > pDuplicate) {
+                if (randomGenerator.nextDouble() > pCorrupt) {
+                    if (randomGenerator.nextDouble() > pOrder) {
+                        if (randomGenerator.nextDouble() > pDelay) {
+                            sendPacket(dataPacket, "snd ");
+                        } else {
+                            delayPacket(dataPacket);
+                        }
+                    } else {
+                        reorderPacket(dataPacket);
+                    }
+                } else {
+                    sendCorruptPacket(dataPacket);
+                }
+            } else {
+                duplicatePackets(dataPacket);
+            }
+        } else {
+            dropPackets(dataPacket);
+        }
+    }
+
+    private static void storePacket(DatagramPacket dataPacket, int counter) {
+        // Note the time that the packet was first sent, and then store the packet for retransmission if necessary
+        timeSegmentSent[counter] = System.currentTimeMillis();
+        packetsSent[counter] = dataPacket;
+        System.out.println("Packet stored in index " + counter);
     }
 
 }
