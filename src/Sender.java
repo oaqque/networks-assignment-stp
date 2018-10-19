@@ -96,8 +96,15 @@ public class Sender {
                     System.arraycopy(udpData, HEADER_SIZE, tempData, HEADER_SIZE, bytesRead);
                     DatagramPacket dataPacket = new DatagramPacket(tempData, tempData.length, receiverHost,
                             receiverPort);
-                    senderSocket.send(dataPacket);
-                    printToLog(dataPacket, "snd");
+
+                    // Simulate the chance that the packet will be dropped
+                    if (randomGenerator.nextDouble() > pDrop) {
+                        senderSocket.send(dataPacket);
+                        printToLog(dataPacket, "snd ");
+                    } else {
+                        printToLog(dataPacket, "drop");
+                        System.out.println("PACKET DROPPED");
+                    }
 
                     // Note the time the segment was sent and store the packet in the array
                     timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
@@ -107,11 +114,16 @@ public class Sender {
                     currentSeqNum += tempData.length - HEADER_SIZE;
                     dataSent += tempData.length - HEADER_SIZE;
 
-                    System.out.println("Packet successfully sent! Data Sent: " + dataSent);
                 } else {
                     DatagramPacket dataPacket = new DatagramPacket(udpData, udpData.length, receiverHost, receiverPort);
-                    senderSocket.send(dataPacket);
-                    printToLog(dataPacket, "snd");
+                    // Simulate the chance that the packet will be dropped
+                    if (randomGenerator.nextDouble() > pDrop) {
+                        senderSocket.send(dataPacket);
+                        printToLog(dataPacket, "snd ");
+                    } else {
+                        printToLog(dataPacket, "drop");
+                        System.out.println("PACKET DROPPED");
+                    }
 
                     // Note the time the segment was sent and store the packet in the array
                     timeSegmentSent[counter] = System.currentTimeMillis(); // Note time segment was sent
@@ -145,7 +157,7 @@ public class Sender {
                     DatagramPacket ackPacket = new DatagramPacket(new byte[HEADER_SIZE], HEADER_SIZE);
                     senderSocket.receive(ackPacket);
                     long currentTime = System.currentTimeMillis(); // Note time the packet was received
-                    printToLog(ackPacket, "rcv");
+                    printToLog(ackPacket, "rcv ");
 
                     // Update book keeping
                     STP stp = getHeaderFromPacket(ackPacket);
@@ -170,7 +182,7 @@ public class Sender {
                     System.out.println("Retransmitting package...");
                     int i = (int) Math.ceil((lastByteAcked - initialSequenceNum - 1) / (double) mss);
                     senderSocket.send(packetsSent[i]);
-                    printToLog(packetsSent[i], "RXT");
+                    printToLog(packetsSent[i], "RXT ");
                     continue;
                     }
             }
@@ -271,7 +283,7 @@ public class Sender {
         DatagramPacket synPacket = new DatagramPacket(connectionRequest.getHeader(), HEADER_SIZE, receiverHost,
                 receiverPort);
         senderSocket.send(synPacket);
-        printToLog(synPacket, "snd");
+        printToLog(synPacket, "snd ");
         System.out.println("SYN Packet successfully sent");
 
         // Block while waiting for SYNACK Packet
@@ -285,7 +297,7 @@ public class Sender {
                 !checkSTPAckNum(synAckPacket, clientisn+1)) {
             senderSocket.receive(synAckPacket);
         }
-        printToLog(synAckPacket, "rcv");
+        printToLog(synAckPacket, "rcv ");
         System.out.println("SYNACK Packet successfully received");
 
         // Retrieve the STP header from the SYNACK Packet
@@ -297,7 +309,7 @@ public class Sender {
         STP ackSTP = new STP(true, false, false, clientisn+1, serverisn+1);
         DatagramPacket ackPacket = new DatagramPacket(ackSTP.getHeader(), HEADER_SIZE, receiverHost, receiverPort);
         senderSocket.send(ackPacket);
-        printToLog(ackPacket, "snd");
+        printToLog(ackPacket, "snd ");
         System.out.println("ACK Packet sent, three-way handshake complete");
         System.out.println("--------------------------------------------");
         // Store the correct sequence numbers and acknowledgement numbers
